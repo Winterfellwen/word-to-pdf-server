@@ -1,6 +1,4 @@
-// Vercel 服务端
-// npm install express mammoth jspdf
-
+// Vercel 服务端 - Word 转 PDF
 const express = require('express');
 const mammoth = require('mammoth');
 const { jsPDF } = require('jspdf');
@@ -9,16 +7,30 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '50mb' }));
 
+app.get('/', (req, res) => {
+  res.json({ status: 'ok', message: 'Word to PDF converter' });
+});
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.post('/convert', async (req, res) => {
   try {
     let buffer = req.body;
-    if (!buffer || !Buffer.isBuffer(buffer)) {
-      return res.status(400).json({ success: false, error: 'No file' });
+    
+    if (!buffer) {
+      return res.status(400).json({ success: false, error: 'No body' });
+    }
+    
+    if (!Buffer.isBuffer(buffer)) {
+      buffer = Buffer.from(buffer);
     }
 
     console.log('Converting:', buffer.length, 'bytes');
 
-    const result = await mammoth.convertToHtml({ arrayBuffer: buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length) });
+    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length);
+    const result = await mammoth.convertToHtml({ arrayBuffer });
     const html = result.value;
 
     const doc = new jsPDF();
@@ -39,20 +51,16 @@ app.post('/convert', async (req, res) => {
       y += 7;
     }
 
-    const pdfBuf = doc.output('arraybuffer');
+    const pdfBuffer = doc.output('arraybuffer');
+    
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename=doc.pdf');
-    res.send(Buffer.from(pdfBuf));
+    res.send(Buffer.from(pdfBuffer));
 
   } catch (err) {
     console.error('Error:', err);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message, stack: err.stack });
   }
 });
-
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Server:', PORT));
 
 module.exports = app;
