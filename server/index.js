@@ -18,21 +18,29 @@ app.post('/convert', async (req, res) => {
       return res.status(400).json({ error: 'No body' });
     }
     
-    // Convert to Buffer if needed
-    if (typeof buffer === 'string') {
-      buffer = Buffer.from(buffer);
+    // Create Buffer properly
+    let buf;
+    if (Buffer.isBuffer(buffer)) {
+      buf = buffer;
+    } else if (typeof buffer === 'string') {
+      buf = Buffer.from(buffer);
+    } else {
+      buf = Buffer.from(JSON.stringify(buffer));
     }
     
-    console.log('Input size:', buffer.length);
+    console.log('Buffer length:', buf.length);
     
-    // Try mammoth
-    const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length);
+    // Try mammoth with proper array buffer
+    const uint8Array = new Uint8Array(buf);
+    const arrayBuffer = uint8Array.buffer;
+    
+    console.log('Calling mammoth...');
     const result = await mammoth.convertToHtml({ arrayBuffer });
     const html = result.value || '';
     
-    console.log('HTML size:', html.length);
+    console.log('HTML length:', html.length);
     
-    // Simple jsPDF
+    // jsPDF
     const doc = new jsPDF();
     doc.setFontSize(16);
     doc.text('Document', 20, 20);
@@ -48,7 +56,7 @@ app.post('/convert', async (req, res) => {
     }
     
     const pdf = doc.output('arraybuffer');
-    console.log('PDF size:', pdf.byteLength);
+    console.log('PDF length:', pdf.byteLength);
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename=doc.pdf');
