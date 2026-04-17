@@ -4,75 +4,59 @@ const mammoth = require('mammoth');
 const { jsPDF } = require('jspdf');
 
 const app = express();
-
 app.use(express.json({ limit: '50mb' }));
 app.use(express.raw({ type: 'application/octet-stream', limit: '50mb' }));
 
-app.get('/', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+app.get('/', (req, res) => res.json({ status: 'ok' }));
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.post('/convert', async (req, res) => {
-  console.log('Request received');
-  console.log('Body type:', typeof req.body);
-  console.log('Content-Type:', req.get('Content-Type'));
-  
-  let buffer = req.body;
-  
   try {
+    let buffer = req.body;
+    
     if (!buffer) {
-      console.log('No body');
-      return res.status(400).json({ success: false, error: 'No body' });
+      return res.status(400).json({ error: 'No body' });
     }
     
+    // Convert to Buffer if needed
     if (typeof buffer === 'string') {
       buffer = Buffer.from(buffer);
     }
     
-    console.log('Buffer length:', buffer.length);
+    console.log('Input size:', buffer.length);
     
+    // Try mammoth
     const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.length);
-    console.log('Converting...');
-    
     const result = await mammoth.convertToHtml({ arrayBuffer });
-    const html = result.value;
+    const html = result.value || '';
     
-    console.log('HTML length:', html.length);
+    console.log('HTML size:', html.length);
     
+    // Simple jsPDF
     const doc = new jsPDF();
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const margin = 20;
-    const contentWidth = pageWidth - margin * 2;
-    
     doc.setFontSize(16);
-    doc.text('Document', margin, margin + 10);
+    doc.text('Document', 20, 20);
     
-    const text = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim();
-    const lines = doc.splitTextToSize(text, contentWidth);
+    const cleanText = html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+    const lines = doc.splitTextToSize(cleanText, 170);
     
-    let y = margin + 25;
+    let y = 30;
     for (const line of lines) {
-      if (y > 280) { doc.addPage(); y = margin; }
-      doc.text(line, margin, y);
+      if (y > 280) { doc.addPage(); y = 20; }
+      doc.text(line, 20, y);
       y += 7;
     }
     
-    const pdfBuffer = doc.output('arraybuffer');
-    
-    console.log('PDF generated');
+    const pdf = doc.output('arraybuffer');
+    console.log('PDF size:', pdf.byteLength);
     
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', 'attachment; filename=doc.pdf');
-    res.send(Buffer.from(pdfBuffer));
+    res.send(Buffer.from(pdf));
     
   } catch (err) {
     console.error('Error:', err);
-    console.error('Stack:', err.stack);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
