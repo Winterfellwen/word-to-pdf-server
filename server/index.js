@@ -1,43 +1,98 @@
-// server/index.js - Vercel Serverless
+// server/index.js - Word to PDF with progress logging
 const express = require('express');
 const mammoth = require('mammoth');
 const { jsPDF } = require('jspdf');
 
 const app = express();
-app.use(express.raw({ type: 'application/octet-stream', limit: '50mb' }));
+
+// CORS for小程序
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Max-Age', '3600');
+  if (req.method === 'OPTIONS') {
+    return res.status(204).send();
+  }
+  next();
+});
+
+app.use(express.raw({ type: '*/*', limit: '50mb' }));
 
 const convertHandler = async (req, res) => {
+  const requestId = Date.now().toString(36);
+  console.log(`[${requestId}] Request started`);
+  
   try {
-    if (!req.body || req.body.length === 0) {
-      return res.status(400).json({ error: 'Empty body' });
+    let buffer;
+    
+    if (Buffer.isBuffer(req.body)) {
+      buffer = req.body;
+    } else if (req.body && typeof req.body === 'string') {
+      buffer = Buffer.from(req.body);
+    } else {
+      console.log(`[${requestId}] Invalid body type: ${typeof req.body}`);
+      return res.status(400).json({ error: 'Invalid body', type: typeof req.body, requestId });
     }
     
-    const uint8Array = new Uint8Array(req.body);
-    const result = await mammoth.extractRawText({ arrayBuffer: uint8Array.buffer });
+    console.log(`[${requestId}] Buffer length: ${buffer?.length}`);
+    
+    if (!buffer || buffer.length < 100) {
+      return res.status(400).json({ error: 'File too small', len: buffer?.length, requestId });
+    }
+    
+    // Step 1: Extract text
+    console.log(`[${requestId}] Extracting text...`);
+    const result = await mammoth.extractRawText({ buffer });
     const text = result.value || '';
+    console.log(`[${requestId}] Extracted text length: ${text.length}`);
     
-    const doc = new jsPDF();
-    const lines = doc.splitTextToSize(text, 170);
-    
-    let y = 20;
-    for (const line of lines) {
-      if (y > 280) { doc.addPage(); y = 20; }
-      doc.text(line, 20, y);
-      y += 7;
+    if (!text) {
+      return res.status(400).json({ error: 'No text extracted', requestId });
     }
+    
+    // Step 2: Generate PDF
+    console.log(`[${requestId}] Generating PDF...`);
+    const doc = new jsPDF();
+    const margin = 20;
+    const maxWidth = doc.internal.pageSize.getWidth() - margin * 2;
+    const lines = doc.splitTextToSize(text, maxWidth);
+    
+    console.log(`[${requestId}] Lines: ${lines.length}`);
+    
+    let y = margin;
+    for (let i = 0; i < lines.length; i++) {
+      if (y > 270) { doc.addPage(); y = margin; }
+      doc.text(lines[i], margin, y);
+      y += 7;
+      
+      // Progress every 50 lines
+      if (i % 50 === 0) {
+        console.log(`[${requestId}] Progress: ${i}/${lines.length}`);
+      }
+    }
+    
+    console.log(`[${requestId}] PDF generated`);
     
     const pdf = doc.output('arraybuffer');
+    console.log(`[${requestId}] PDF size: ${pdf.byteLength}`);
+    
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('X-Request-Id', requestId);
     res.send(Buffer.from(pdf));
+    
+    console.log(`[${requestId}] Response sent`);
+    
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
+    console.error(`[${requestId}] Error:`, err.message);
+    res.status(500).json({ error: err.message, requestId });
   }
 };
 
-app.get('/', (req, res) => res.json({ status: 'ok', message: 'Word to PDF API' }));
-app.post('/', convertHandler);
-app.get('/api', (req, res) => res.json({ status: 'ok', message: 'Word to PDF API' }));
-app.post('/api', convertHandler);
+app.all('/', convertHandler);
+app.all('/api', convertHandler);
+
+const PORT = 3000;
+app.listen(PORT, () => console.log(`Server on ${PORT}`));
 
 module.exports = app;
